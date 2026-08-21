@@ -1,0 +1,67 @@
+package internal
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+
+	notificationv1 "github.com/Muxcore-Media/contracts-notification/muxcore/notification/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+
+type guardViolationEventPayload struct {
+	User         string `json:"user"`
+	Summary      string `json:"summary"`
+	RuleType     string `json:"rule_type"`
+	LegacyNotify bool   `json:"legacy_notify,omitempty"`
+}
+
+func (m *Module) notifyViolation(ctx context.Context, user, summary, ruleType string) {
+	payload := guardViolationEventPayload{
+		User:         user,
+		Summary:      summary,
+		RuleType:     ruleType,
+		LegacyNotify: m.getNotifyOnViolation(),
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	mc := m.eventClient()
+	if mc != nil {
+		if err := mc.Events.Publish(ctx, "playback.guard.violation", m.id, data); err != nil {
+			slog.Debug("playback-guard: publish violation event failed", "error", err)
+		}
+	}
+	if !payload.LegacyNotify {
+		return
+	}
+	addr, err := m.findCapabilityAddr(ctx, "notification")
+	if err != nil {
+		return
+	}
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	cli := notificationv1.NewNotificationServiceClient(conn)
+	_, _ = cli.Notify(ctx, &notificationv1.NotifyRequest{
+		Title:        "Playback guard violation",
+		Message:      summary,
+		Severity:     "warning",
+		SourceModule: m.id,
+		Fields: map[string]string{
+			"user":      user,
+			"type":      ruleType,
+			"rule_type": ruleType,
+		},
+	})
+}
+
+func (m *Module) getNotifyOnViolation() bool {
+	m.cfgMu.RLock()
+	defer m.cfgMu.RUnlock()
+	return m.notifyOnViolation
+}

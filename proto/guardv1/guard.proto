@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+package muxcore.playback.guard.v1;
+
+option go_package = "github.com/Muxcore-Media/playback-guard/proto/guardv1;guardv1";
+
+service PlaybackGuardService {
+  rpc ListRules(ListRulesRequest) returns (ListRulesResponse);
+  rpc UpsertRule(UpsertRuleRequest) returns (UpsertRuleResponse);
+  rpc ListViolations(ListViolationsRequest) returns (ListViolationsResponse);
+  rpc AcknowledgeViolations(AcknowledgeViolationsRequest) returns (AcknowledgeViolationsResponse);
+  rpc TerminateSession(TerminateSessionRequest) returns (TerminateSessionResponse);
+  rpc GetTrustScore(GetTrustScoreRequest) returns (GetTrustScoreResponse);
+  rpc ListTrustScores(ListTrustScoresRequest) returns (ListTrustScoresResponse);
+  rpc ResetTrustScore(ResetTrustScoreRequest) returns (ResetTrustScoreResponse);
+  rpc MergeUsers(MergeUsersRequest) returns (MergeUsersResponse);
+}
+
+enum RuleType {
+  RULE_TYPE_UNSPECIFIED = 0;
+  RULE_TYPE_IMPOSSIBLE_TRAVEL = 1;
+  RULE_TYPE_SIMULTANEOUS_LOCATIONS = 2;
+  RULE_TYPE_DEVICE_VELOCITY = 3;
+  RULE_TYPE_CONCURRENT_STREAMS = 4;
+  RULE_TYPE_GEO_RESTRICTION = 5;
+  RULE_TYPE_ACCOUNT_INACTIVITY = 6;
+}
+
+message GuardRule {
+  string id = 1;
+  RuleType type = 2;
+  string name = 3;
+  bool enabled = 4;
+  map<string, string> params = 5;
+}
+
+message Violation {
+  string id = 1;
+  string rule_id = 2;
+  RuleType rule_type = 3;
+  string user_id = 4;
+  string user_name = 5;
+  string summary = 6;
+  string severity = 7;
+  int64 created_at_unix = 8;
+  bool acknowledged = 9;
+}
+
+message ListRulesRequest {}
+
+message ListRulesResponse {
+  repeated GuardRule rules = 1;
+}
+
+message UpsertRuleRequest {
+  GuardRule rule = 1;
+}
+
+message UpsertRuleResponse {
+  GuardRule rule = 1;
+}
+
+message ListViolationsRequest {
+  bool include_acknowledged = 1;
+  int32 limit = 2;
+}
+
+message ListViolationsResponse {
+  repeated Violation violations = 1;
+}
+
+message AcknowledgeViolationsRequest {
+  repeated string violation_ids = 1;
+}
+
+message AcknowledgeViolationsResponse {
+  int32 updated = 1;
+}
+
+message TerminateSessionRequest {
+  string session_id = 1;
+  string server_type = 2;
+  string reason = 3;
+}
+
+message TerminateSessionResponse {
+  bool ok = 1;
+  string error = 2;
+}
+
+message TrustScore {
+  string user_id = 1;
+  string user_name = 2;
+  int32 score = 3;
+  int64 updated_at_unix = 4;
+}
+
+message GetTrustScoreRequest {
+  string user_id = 1;
+  string user_name = 2;
+}
+
+message GetTrustScoreResponse {
+  TrustScore score = 1;
+}
+
+message ListTrustScoresRequest {
+  int32 limit = 1;
+}
+
+message ListTrustScoresResponse {
+  repeated TrustScore scores = 1;
+}
+
+message ResetTrustScoreRequest {
+  string user_id = 1;
+  string user_name = 2;
+}
+
+message ResetTrustScoreResponse {
+  TrustScore score = 1;
+}
+
+message MergeUsersRequest {
+  string source_user_id = 1;
+  string source_user_name = 2;
+  string target_user_id = 3;
+  string target_user_name = 4;
+}
+
+message MergeUsersResponse {
+  int32 violations_updated = 1;
+  int32 aliases_created = 2;
+  int32 sessions_updated = 3;
+}
