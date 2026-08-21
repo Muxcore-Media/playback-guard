@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Muxcore-Media/core/sdk/go/client"
+	playbackevents "github.com/Muxcore-Media/contracts-playback/events"
 	eventsv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/events/v1"
 )
 
@@ -25,7 +26,7 @@ func (m *Module) subscribePlaybackEvents() {
 	if mc == nil {
 		return
 	}
-	for _, et := range []string{"playback.started", "playback.stopped"} {
+	for _, et := range []string{playbackevents.EventPlaybackStarted, playbackevents.EventPlaybackStopped} {
 		ch, cancel, err := mc.Events.Subscribe(context.Background(), et)
 		if err != nil {
 			slog.Debug("playback-guard: subscribe failed", "type", et, "error", err)
@@ -55,7 +56,7 @@ func (m *Module) handlePlaybackEvent(eventType string, evt *eventsv1.Event) {
 		slog.Debug("playback-guard: bad playback payload", "error", err)
 		return
 	}
-	if strings.EqualFold(eventType, "playback.started") {
+	if strings.EqualFold(eventType, playbackevents.EventPlaybackStarted) {
 		m.evaluateOnSessionStart(context.Background(), pe)
 	}
 }

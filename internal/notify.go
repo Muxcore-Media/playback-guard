@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	notificationv1 "github.com/Muxcore-Media/contracts-notification/muxcore/notification/v1"
+	playbackevents "github.com/Muxcore-Media/contracts-playback/events"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -30,7 +31,7 @@ func (m *Module) notifyViolation(ctx context.Context, user, summary, ruleType st
 	}
 	mc := m.eventClient()
 	if mc != nil {
-		if err := mc.Events.Publish(ctx, "playback.guard.violation", m.id, data); err != nil {
+		if err := mc.Events.Publish(ctx, playbackevents.EventPlaybackGuardViolation, m.id, data); err != nil {
 			slog.Debug("playback-guard: publish violation event failed", "error", err)
 		}
 	}

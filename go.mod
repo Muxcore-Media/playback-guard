@@ -4,6 +4,7 @@ go 1.26.4
 
 require (
 	github.com/Muxcore-Media/contracts-notification v0.1.0
+	github.com/Muxcore-Media/contracts-playback v0.1.0
 	github.com/Muxcore-Media/core v0.5.1
 	github.com/Muxcore-Media/core/pkg/contracts v0.5.2
 	github.com/Muxcore-Media/core/sdk/go/client v0.5.2
@@ -39,6 +40,8 @@ require (
 replace github.com/Muxcore-Media/playback-monitor => ../playback-monitor
 
 replace github.com/Muxcore-Media/contracts-notification => ../contracts-notification
+
+replace github.com/Muxcore-Media/contracts-playback => ../contracts-playback
 
 replace github.com/Muxcore-Media/emby => ../emby
 
