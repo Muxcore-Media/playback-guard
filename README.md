@@ -17,4 +17,4 @@ Tracearr-style sharing detection for MuxCore: guard rules, violations, trust sco
 
 ## Status
 
-v0.1.0 scaffold: SQLite schema, gRPC CRUD, mesh subscription stub. Rule evaluators and playback-monitor integration pending.
+v0.1.0 — Tracearr-style guard rules with SQLite store, mesh playback subscription, `playback-monitor` session queries, concurrent-stream / geo / account evaluators, trust scores, user merge, and optional violation notifications (`PLAYBACK_GUARD_NOTIFY_ON_VIOLATION`).
