@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,31 +19,31 @@ func trustUserKey(userID, userName string) string {
 	return "name:" + strings.ToLower(strings.TrimSpace(userName))
 }
 
-func (m *Module) getTrustScore(ctx context.Context, userID, userName string) (guardv1.TrustScore, error) {
+func (m *Module) getTrustScore(ctx context.Context, userID, userName string) (*guardv1.TrustScore, error) {
 	key := trustUserKey(userID, userName)
 	if key == "name:" {
-		return guardv1.TrustScore{}, fmt.Errorf("user_id or user_name required")
+		return nil, fmt.Errorf("user_id or user_name required")
 	}
 	db, err := m.dbConn()
 	if err != nil {
-		return guardv1.TrustScore{}, err
+		return nil, err
 	}
 	var score int
 	var uid, uname, updated string
 	err = db.QueryRowContext(ctx,
 		`SELECT user_id, user_name, score, updated_at FROM trust_scores WHERE user_key = ?`, key,
 	).Scan(&uid, &uname, &score, &updated)
-	if err == sql.ErrNoRows {
-		return guardv1.TrustScore{
+	if errors.Is(err, sql.ErrNoRows) {
+		return &guardv1.TrustScore{
 			UserId:   userID,
 			UserName: userName,
 			Score:    defaultTrustScore,
 		}, nil
 	}
 	if err != nil {
-		return guardv1.TrustScore{}, err
+		return nil, err
 	}
-	ts := guardv1.TrustScore{UserId: uid, UserName: uname, Score: int32(score)}
+	ts := &guardv1.TrustScore{UserId: uid, UserName: uname, Score: clampInt32(score)}
 	if t, err := timeParseRFC3339(updated); err == nil {
 		ts.UpdatedAtUnix = t.Unix()
 	}
@@ -63,7 +64,7 @@ func (m *Module) listTrustScores(ctx context.Context, limit int) ([]*guardv1.Tru
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]*guardv1.TrustScore, 0)
 	for rows.Next() {
 		var ts guardv1.TrustScore
@@ -105,14 +106,14 @@ func (m *Module) adjustTrustOnViolation(ctx context.Context, userID, userName st
 	return err
 }
 
-func (m *Module) resetTrustScore(ctx context.Context, userID, userName string) (guardv1.TrustScore, error) {
+func (m *Module) resetTrustScore(ctx context.Context, userID, userName string) (*guardv1.TrustScore, error) {
 	key := trustUserKey(userID, userName)
 	if key == "name:" {
-		return guardv1.TrustScore{}, fmt.Errorf("user_id or user_name required")
+		return nil, fmt.Errorf("user_id or user_name required")
 	}
 	db, err := m.dbConn()
 	if err != nil {
-		return guardv1.TrustScore{}, err
+		return nil, err
 	}
 	now := nowRFC3339()
 	_, err = db.ExecContext(ctx, `
@@ -124,7 +125,7 @@ func (m *Module) resetTrustScore(ctx context.Context, userID, userName string) (
 		key, userID, userName, defaultTrustScore, now, defaultTrustScore,
 	)
 	if err != nil {
-		return guardv1.TrustScore{}, err
+		return nil, err
 	}
 	return m.getTrustScore(ctx, userID, userName)
 }
@@ -134,7 +135,7 @@ func (m *Module) GetTrustScore(ctx context.Context, req *guardv1.GetTrustScoreRe
 	if err != nil {
 		return nil, err
 	}
-	return &guardv1.GetTrustScoreResponse{Score: &score}, nil
+	return &guardv1.GetTrustScoreResponse{Score: score}, nil
 }
 
 func (m *Module) ListTrustScores(ctx context.Context, req *guardv1.ListTrustScoresRequest) (*guardv1.ListTrustScoresResponse, error) {
@@ -150,5 +151,5 @@ func (m *Module) ResetTrustScore(ctx context.Context, req *guardv1.ResetTrustSco
 	if err != nil {
 		return nil, err
 	}
-	return &guardv1.ResetTrustScoreResponse{Score: &score}, nil
+	return &guardv1.ResetTrustScoreResponse{Score: score}, nil
 }

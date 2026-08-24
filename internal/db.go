@@ -20,7 +20,7 @@ func (m *Module) initDB(ctx context.Context) error {
 	}
 	db.SetMaxOpenConns(1)
 	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL`); err != nil {
-		db.Close()
+		_ = db.Close()
 		return err
 	}
 	stmts := []string{
@@ -61,7 +61,7 @@ func (m *Module) initDB(ctx context.Context) error {
 	}
 	for _, stmt := range stmts {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			db.Close()
+			_ = db.Close()
 			return err
 		}
 	}

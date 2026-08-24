@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/Muxcore-Media/core/sdk/go/client"
 	playbackevents "github.com/Muxcore-Media/contracts-playback/events"
 	eventsv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/events/v1"
+	"github.com/Muxcore-Media/core/sdk/go/client"
 )
 
 type playbackEvent struct {
@@ -21,13 +21,13 @@ type playbackEvent struct {
 	ExternalSession string `json:"external_session_id"`
 }
 
-func (m *Module) subscribePlaybackEvents() {
+func (m *Module) subscribePlaybackEvents(ctx context.Context) {
 	mc := m.eventClient()
 	if mc == nil {
 		return
 	}
 	for _, et := range []string{playbackevents.EventPlaybackStarted, playbackevents.EventPlaybackStopped} {
-		ch, cancel, err := mc.Events.Subscribe(context.Background(), et)
+		ch, cancel, err := mc.Events.Subscribe(ctx, et)
 		if err != nil {
 			slog.Debug("playback-guard: subscribe failed", "type", et, "error", err)
 			continue
@@ -35,7 +35,7 @@ func (m *Module) subscribePlaybackEvents() {
 		go func(events <-chan *eventsv1.Event, eventType string, cancel context.CancelFunc) {
 			defer cancel()
 			for evt := range events {
-				m.handlePlaybackEvent(eventType, evt)
+				m.handlePlaybackEvent(ctx, eventType, evt)
 			}
 		}(ch, et, cancel)
 	}
@@ -47,7 +47,7 @@ func (m *Module) eventClient() *client.Client {
 	return m.mc
 }
 
-func (m *Module) handlePlaybackEvent(eventType string, evt *eventsv1.Event) {
+func (m *Module) handlePlaybackEvent(ctx context.Context, eventType string, evt *eventsv1.Event) {
 	if evt == nil || len(evt.Payload) == 0 {
 		return
 	}
@@ -57,6 +57,6 @@ func (m *Module) handlePlaybackEvent(eventType string, evt *eventsv1.Event) {
 		return
 	}
 	if strings.EqualFold(eventType, playbackevents.EventPlaybackStarted) {
-		m.evaluateOnSessionStart(context.Background(), pe)
+		m.evaluateOnSessionStart(ctx, pe)
 	}
 }

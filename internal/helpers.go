@@ -2,11 +2,12 @@ package internal
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	guardv1 "github.com/Muxcore-Media/playback-guard/proto/guardv1"
+	"github.com/google/uuid"
 )
 
 var errInvalidRule = errors.New("invalid rule")
@@ -62,4 +63,24 @@ func ruleTypeFromString(s string) guardv1.RuleType {
 
 func timeParseRFC3339(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339, s)
+}
+
+func clampInt32(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(n)
+}
+
+func clampInt64ToInt32(n int64) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(n)
 }

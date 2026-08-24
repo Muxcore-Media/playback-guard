@@ -15,8 +15,8 @@ import (
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	"github.com/Muxcore-Media/core/sdk/go/client"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
-	monitorv1 "github.com/Muxcore-Media/playback-monitor/proto/monitorv1"
 	guardv1 "github.com/Muxcore-Media/playback-guard/proto/guardv1"
+	monitorv1 "github.com/Muxcore-Media/playback-monitor/proto/monitorv1"
 	_ "modernc.org/sqlite"
 )
 
@@ -24,23 +24,17 @@ const moduleVersion = "0.1.0"
 
 type Module struct {
 	guardv1.UnimplementedPlaybackGuardServiceServer
-
-	mu    sync.RWMutex
-	cfgMu sync.RWMutex
-	db    *sql.DB
-
-	id       string
-	dbPath   string
-	grpcAddr string
-
-	grpcSrv *grpc.Server
-	grpcLis net.Listener
-
-	monitorOverride monitorv1.PlaybackMonitorServiceClient // tests only
-
-	mc     *client.Client
-	stopCh chan struct{}
-
+	monitorOverride   monitorv1.PlaybackMonitorServiceClient
+	grpcLis           net.Listener
+	stopCh            chan struct{}
+	mc                *client.Client
+	db                *sql.DB
+	grpcSrv           *grpc.Server
+	id                string
+	dbPath            string
+	grpcAddr          string
+	mu                sync.RWMutex
+	cfgMu             sync.RWMutex
 	notifyOnViolation bool
 }
 
@@ -96,7 +90,8 @@ func (m *Module) Init(ctx context.Context) error {
 	if err := m.initDB(ctx); err != nil {
 		return err
 	}
-	lis, err := net.Listen("tcp", m.grpcAddr)
+	var lc net.ListenConfig
+	lis, err := lc.Listen(ctx, "tcp", m.grpcAddr)
 	if err != nil {
 		return fmt.Errorf("listen gRPC %s: %w", m.grpcAddr, err)
 	}
@@ -115,7 +110,7 @@ func (m *Module) Start(ctx context.Context) error {
 			slog.Error("playback-guard gRPC error", "error", err)
 		}
 	}()
-	go m.connectCoreAndSubscribe()
+	go m.connectCoreAndSubscribe(ctx)
 	return nil
 }
 
@@ -137,7 +132,7 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.mc = nil
 	m.mu.Unlock()
 	if mc != nil {
-		mc.Close()
+		_ = mc.Close()
 	}
 	slog.Info("playback-guard stopped")
 	return nil
@@ -153,7 +148,7 @@ func (m *Module) Health(ctx context.Context) error {
 	return db.PingContext(ctx)
 }
 
-func (m *Module) connectCoreAndSubscribe() {
+func (m *Module) connectCoreAndSubscribe(ctx context.Context) {
 	addr := os.Getenv("MUXCORE_GRPC_ADDR")
 	if addr == "" {
 		return
@@ -184,12 +179,12 @@ func (m *Module) connectCoreAndSubscribe() {
 		}
 		m.mu.Lock()
 		if m.mc != nil {
-			m.mc.Close()
+			_ = m.mc.Close()
 		}
 		m.mc = c
 		m.mu.Unlock()
 		slog.Info("playback-guard: connected to core mesh", "addr", addr)
-		m.subscribePlaybackEvents()
+		m.subscribePlaybackEvents(ctx)
 		return
 	}
 }

@@ -6,8 +6,8 @@ import (
 
 	"google.golang.org/grpc"
 
-	monitorv1 "github.com/Muxcore-Media/playback-monitor/proto/monitorv1"
 	guardv1 "github.com/Muxcore-Media/playback-guard/proto/guardv1"
+	monitorv1 "github.com/Muxcore-Media/playback-monitor/proto/monitorv1"
 )
 
 type fakeMonitorClient struct {

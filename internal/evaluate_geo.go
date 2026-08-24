@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	monitorv1 "github.com/Muxcore-Media/playback-monitor/proto/monitorv1"
 	guardv1 "github.com/Muxcore-Media/playback-guard/proto/guardv1"
+	monitorv1 "github.com/Muxcore-Media/playback-monitor/proto/monitorv1"
 )
 
 type ruleRow struct {
@@ -29,7 +29,7 @@ func (m *Module) loadEnabledRules(ctx context.Context, ruleType string) ([]ruleR
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]ruleRow, 0)
 	for rows.Next() {
 		var r ruleRow
@@ -50,7 +50,7 @@ func (m *Module) fireViolation(ctx context.Context, ruleID string, ruleType guar
 		return
 	}
 	displayUser := firstNonEmpty(userName, userID, "unknown")
-	go m.notifyViolation(context.Background(), displayUser, summary, ruleTypeToString(ruleType))
+	go m.notifyViolation(ctx, displayUser, summary, ruleTypeToString(ruleType))
 }
 
 func (m *Module) evaluateOnSessionStart(ctx context.Context, pe playbackEvent) {

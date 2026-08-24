@@ -3,12 +3,13 @@ package internal
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
-	monitorv1 "github.com/Muxcore-Media/playback-monitor/proto/monitorv1"
 	guardv1 "github.com/Muxcore-Media/playback-guard/proto/guardv1"
+	monitorv1 "github.com/Muxcore-Media/playback-monitor/proto/monitorv1"
 )
 
 func (m *Module) resolveCanonicalUser(ctx context.Context, userID, userName string) (string, string) {
@@ -24,7 +25,7 @@ func (m *Module) resolveCanonicalUser(ctx context.Context, userID, userName stri
 	err = db.QueryRowContext(ctx,
 		`SELECT canonical_user_id, canonical_user_name FROM user_aliases WHERE alias_key = ?`, key,
 	).Scan(&canonID, &canonName)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return userID, userName
 	}
 	if err != nil {
@@ -95,7 +96,7 @@ func (m *Module) mergeUsers(ctx context.Context, sourceID, sourceName, targetID,
 	}
 
 	sessionsUpdated = m.mergeMonitorUserIdentity(ctx, sourceID, sourceName, targetID, targetName)
-	return int32(n), sessionsUpdated, nil
+	return clampInt64ToInt32(n), sessionsUpdated, nil
 }
 
 func (m *Module) mergeMonitorUserIdentity(ctx context.Context, sourceID, sourceName, targetID, targetName string) int32 {
@@ -131,12 +132,12 @@ func (m *Module) mergeTrustScoresTx(ctx context.Context, tx *sql.Tx, sourceID, s
 	targetKey := trustUserKey(targetID, targetName)
 	var sourceScore sql.NullInt64
 	err := tx.QueryRowContext(ctx, `SELECT score FROM trust_scores WHERE user_key = ?`, sourceKey).Scan(&sourceScore)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	targetScore := defaultTrustScore
 	err = tx.QueryRowContext(ctx, `SELECT score FROM trust_scores WHERE user_key = ?`, targetKey).Scan(&targetScore)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	merged := targetScore
