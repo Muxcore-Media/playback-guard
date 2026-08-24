@@ -20,6 +20,8 @@ require (
 )
 
 require (
+	github.com/Muxcore-Media/contracts-media v0.1.0 // indirect
+	github.com/Muxcore-Media/core/pkg/tenant v0.5.8 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -33,9 +35,13 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
+replace github.com/Muxcore-Media/core => ../core
 
+replace github.com/Muxcore-Media/core/pkg/contracts => ../core/pkg/contracts
 
+replace github.com/Muxcore-Media/core/sdk/go/client => ../core/sdk/go/client
 
+replace github.com/Muxcore-Media/core/sdk/go/module => ../core/sdk/go/module
 
 replace github.com/Muxcore-Media/playback-monitor => ../playback-monitor
 

@@ -17,7 +17,7 @@ func (m *Module) ListRules(ctx context.Context, _ *guardv1.ListRulesRequest) (*g
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]*guardv1.GuardRule, 0)
 	for rows.Next() {
 		var id, typ, name, paramsJSON string
@@ -82,7 +82,7 @@ func (m *Module) ListViolations(ctx context.Context, req *guardv1.ListViolations
 	}
 	query := `SELECT id, rule_id, rule_type, user_id, user_name, summary, severity, acknowledged, created_at
 		FROM violations WHERE 1=1`
-	args := []any{}
+	args := make([]any, 0, 1)
 	if !req.GetIncludeAcknowledged() {
 		query += ` AND acknowledged = 0`
 	}
@@ -92,7 +92,7 @@ func (m *Module) ListViolations(ctx context.Context, req *guardv1.ListViolations
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]*guardv1.Violation, 0)
 	for rows.Next() {
 		var id, ruleID, ruleTypeStr, userID, userName, summary, severity, createdAt string
@@ -130,7 +130,7 @@ func (m *Module) AcknowledgeViolations(ctx context.Context, req *guardv1.Acknowl
 			return nil, err
 		}
 		n, _ := res.RowsAffected()
-		updated += int32(n)
+		updated += clampInt64ToInt32(n)
 	}
 	return &guardv1.AcknowledgeViolationsResponse{Updated: updated}, nil
 }

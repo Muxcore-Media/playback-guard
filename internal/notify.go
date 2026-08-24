@@ -31,8 +31,8 @@ func (m *Module) notifyViolation(ctx context.Context, user, summary, ruleType st
 	}
 	mc := m.eventClient()
 	if mc != nil {
-		if err := mc.Events.Publish(ctx, playbackevents.EventPlaybackGuardViolation, m.id, data); err != nil {
-			slog.Debug("playback-guard: publish violation event failed", "error", err)
+		if pubErr := mc.Events.Publish(ctx, playbackevents.EventPlaybackGuardViolation, m.id, data); pubErr != nil {
+			slog.Debug("playback-guard: publish violation event failed", "error", pubErr)
 		}
 	}
 	if !payload.LegacyNotify {
@@ -46,7 +46,7 @@ func (m *Module) notifyViolation(ctx context.Context, user, summary, ruleType st
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	cli := notificationv1.NewNotificationServiceClient(conn)
 	_, _ = cli.Notify(ctx, &notificationv1.NotifyRequest{
 		Title:        "Playback guard violation",
