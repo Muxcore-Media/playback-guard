@@ -2,7 +2,9 @@ package internal
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -11,8 +13,9 @@ import (
 )
 
 type fakeMonitorClient struct {
-	sessions []*monitorv1.SessionRecord
-	history  []*monitorv1.SessionRecord
+	sessions   []*monitorv1.SessionRecord
+	history    []*monitorv1.SessionRecord
+	watchUsers []*monitorv1.WatchUser
 }
 
 func (f *fakeMonitorClient) IngestSessionEvent(context.Context, *monitorv1.IngestSessionEventRequest, ...grpc.CallOption) (*monitorv1.IngestSessionEventResponse, error) {
@@ -22,10 +25,29 @@ func (f *fakeMonitorClient) ListActiveSessions(_ context.Context, _ *monitorv1.L
 	return &monitorv1.ListActiveSessionsResponse{Sessions: f.sessions}, nil
 }
 func (f *fakeMonitorClient) ListHistory(_ context.Context, req *monitorv1.ListHistoryRequest, _ ...grpc.CallOption) (*monitorv1.ListHistoryResponse, error) {
-	if len(f.history) > 0 {
-		return &monitorv1.ListHistoryResponse{Sessions: f.history}, nil
+	sessions := f.history
+	if len(sessions) == 0 {
+		return &monitorv1.ListHistoryResponse{Sessions: nil}, nil
 	}
-	return &monitorv1.ListHistoryResponse{Sessions: nil}, nil
+	if req.GetUserId() != "" {
+		filtered := make([]*monitorv1.SessionRecord, 0)
+		for _, s := range sessions {
+			if s != nil && s.GetUserId() == req.GetUserId() {
+				filtered = append(filtered, s)
+			}
+		}
+		return &monitorv1.ListHistoryResponse{Sessions: filtered}, nil
+	}
+	if q := strings.TrimSpace(req.GetQuery()); q != "" {
+		filtered := make([]*monitorv1.SessionRecord, 0)
+		for _, s := range sessions {
+			if s != nil && strings.EqualFold(s.GetUserName(), q) {
+				filtered = append(filtered, s)
+			}
+		}
+		return &monitorv1.ListHistoryResponse{Sessions: filtered}, nil
+	}
+	return &monitorv1.ListHistoryResponse{Sessions: sessions}, nil
 }
 func (f *fakeMonitorClient) GetHomeStats(context.Context, *monitorv1.GetHomeStatsRequest, ...grpc.CallOption) (*monitorv1.GetHomeStatsResponse, error) {
 	return nil, nil
@@ -33,8 +55,11 @@ func (f *fakeMonitorClient) GetHomeStats(context.Context, *monitorv1.GetHomeStat
 func (f *fakeMonitorClient) GetItemWatchStats(context.Context, *monitorv1.GetItemWatchStatsRequest, ...grpc.CallOption) (*monitorv1.GetItemWatchStatsResponse, error) {
 	return nil, nil
 }
-func (f *fakeMonitorClient) ListWatchUsers(context.Context, *monitorv1.ListWatchUsersRequest, ...grpc.CallOption) (*monitorv1.ListWatchUsersResponse, error) {
-	return nil, nil
+func (f *fakeMonitorClient) ListWatchUsers(_ context.Context, _ *monitorv1.ListWatchUsersRequest, _ ...grpc.CallOption) (*monitorv1.ListWatchUsersResponse, error) {
+	if f.watchUsers != nil {
+		return &monitorv1.ListWatchUsersResponse{Users: f.watchUsers}, nil
+	}
+	return &monitorv1.ListWatchUsersResponse{}, nil
 }
 func (f *fakeMonitorClient) GetStreamAnalytics(context.Context, *monitorv1.GetStreamAnalyticsRequest, ...grpc.CallOption) (*monitorv1.GetStreamAnalyticsResponse, error) {
 	return nil, nil
@@ -151,6 +176,60 @@ func TestConcurrentStreamsViolation(t *testing.T) {
 	if len(violations.GetViolations()) != 1 {
 		t.Fatalf("expected deduped violation, got %d", len(violations.GetViolations()))
 	}
+}
+
+func TestTerminateOnViolation(t *testing.T) {
+	ctx := context.Background()
+	m := testModule(t)
+	var terminated bool
+	m.terminateHook = func(_ context.Context, req *guardv1.TerminateSessionRequest) (*guardv1.TerminateSessionResponse, error) {
+		if req.GetSessionId() == "ext-share" && req.GetServerType() == "jellyfin" {
+			terminated = true
+		}
+		return &guardv1.TerminateSessionResponse{Ok: true}, nil
+	}
+	m.monitorOverride = &fakeMonitorClient{sessions: []*monitorv1.SessionRecord{
+		{UserId: "u1", UserName: "alice", ExternalSessionId: "ext-share", GeoCountry: "US", GeoLat: 40.7, GeoLon: -74.0, StartedAtUnix: time.Now().Unix()},
+	}}
+	_, err := m.UpsertRule(ctx, &guardv1.UpsertRuleRequest{
+		Rule: &guardv1.GuardRule{
+			Type:    guardv1.RuleType_RULE_TYPE_GEO_RESTRICTION,
+			Name:    "Block US",
+			Enabled: true,
+			Params:  map[string]string{"mode": "blocklist", "countries": "US", "action": "terminate"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.evaluateGeoRestriction(ctx, playbackEvent{
+		UserID: "u1", UserName: "alice", ExternalSession: "ext-share", ServerType: "jellyfin",
+	})
+	if !terminated {
+		t.Fatal("expected terminate on geo violation")
+	}
+}
+
+func TestListRecentHistoryByUserName(t *testing.T) {
+	ctx := context.Background()
+	m := testModule(t)
+	now := time.Now()
+	m.monitorOverride = &fakeMonitorClient{history: []*monitorv1.SessionRecord{
+		{UserName: "alice", IpAddress: "203.0.113.1", StartedAtUnix: now.Add(-time.Hour).Unix()},
+	}}
+	_, err := m.UpsertRule(ctx, &guardv1.UpsertRuleRequest{
+		Rule: &guardv1.GuardRule{
+			Type:    guardv1.RuleType_RULE_TYPE_DEVICE_VELOCITY,
+			Name:    "IPs",
+			Enabled: true,
+			Params:  map[string]string{"max_ips": "1", "window_hours": "24"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.evaluateDeviceVelocity(ctx, playbackEvent{UserName: "alice", IPAddress: "198.51.100.2"})
+	assertViolationCount(t, m, ctx, 1)
 }
 
 func testModule(t *testing.T) *Module {

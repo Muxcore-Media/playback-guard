@@ -37,7 +37,7 @@ func (m *Module) evaluateConcurrentStreams(ctx context.Context, pe playbackEvent
 		}
 		displayUser := firstNonEmpty(userName, userID, "unknown")
 		summary := fmt.Sprintf("%s has %d active streams (limit %d)", displayUser, count, maxStreams)
-		m.fireViolation(ctx, rule.id, guardv1.RuleType_RULE_TYPE_CONCURRENT_STREAMS, userID, userName, summary, "warning")
+		m.fireViolation(ctx, rule, guardv1.RuleType_RULE_TYPE_CONCURRENT_STREAMS, userID, userName, summary, "warning", pe)
 	}
 }
 

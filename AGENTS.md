@@ -8,7 +8,7 @@ MuxCore sidecar module (`playback-guard`). Workspace deploy and SSH: [`../AGENTS
 |-------|-------|
 | Directory | `playback-guard` |
 | Capabilities | see muxcore.json |
-| Contracts | none declared |
+| Contracts | `contracts-playback`, `contracts-notification` |
 
 ## Agent rules
 

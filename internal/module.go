@@ -25,6 +25,7 @@ const moduleVersion = "0.1.0"
 type Module struct {
 	guardv1.UnimplementedPlaybackGuardServiceServer
 	monitorOverride   monitorv1.PlaybackMonitorServiceClient
+	terminateHook     func(context.Context, *guardv1.TerminateSessionRequest) (*guardv1.TerminateSessionResponse, error)
 	grpcLis           net.Listener
 	stopCh            chan struct{}
 	mc                *client.Client
@@ -33,15 +34,17 @@ type Module struct {
 	id                string
 	dbPath            string
 	grpcAddr          string
+	moduleToken       string
 	mu                sync.RWMutex
 	cfgMu             sync.RWMutex
 	notifyOnViolation bool
 }
 
 type Config struct {
-	ID       string
-	DBPath   string
-	GRPCAddr string
+	ID          string
+	DBPath      string
+	GRPCAddr    string
+	ModuleToken string
 }
 
 func NewModule(cfg Config) *Module {
@@ -52,7 +55,7 @@ func NewModule(cfg Config) *Module {
 		cfg.DBPath = "/var/lib/muxcore-playback-guard/guard.db"
 	}
 	if cfg.GRPCAddr == "" {
-		cfg.GRPCAddr = ":9561"
+		cfg.GRPCAddr = "127.0.0.1:9561"
 	}
 	if v := os.Getenv("PLAYBACK_GUARD_DB_PATH"); v != "" {
 		cfg.DBPath = v
@@ -65,6 +68,7 @@ func NewModule(cfg Config) *Module {
 		id:                cfg.ID,
 		dbPath:            cfg.DBPath,
 		grpcAddr:          cfg.GRPCAddr,
+		moduleToken:       cfg.ModuleToken,
 		stopCh:            make(chan struct{}),
 		notifyOnViolation: notifyViolation,
 	}
@@ -82,13 +86,32 @@ func (m *Module) Info() contracts.ModuleInfo {
 			"playback.guard",
 			"settings",
 		},
+		Contracts: []contracts.ContractDeclaration{
+			{
+				Repo:      "github.com/Muxcore-Media/contracts-playback",
+				Interface: "PlaybackGuardEvents",
+				Version:   "v0.1.0",
+			},
+			{
+				Repo:      "github.com/Muxcore-Media/contracts-notification",
+				Interface: "NotificationProvider",
+				Version:   "v0.1.0",
+			},
+		},
 		MinCoreVersion: "0.5.0",
+		HTTPAddr:       m.grpcAddr,
 	}
 }
 
 func (m *Module) Init(ctx context.Context) error {
 	if err := m.initDB(ctx); err != nil {
 		return err
+	}
+	if err := m.loadPersistedSettings(ctx); err != nil {
+		return err
+	}
+	if m.moduleToken == "" {
+		m.moduleToken = moduleTokenFromEnv()
 	}
 	var lc net.ListenConfig
 	lis, err := lc.Listen(ctx, "tcp", m.grpcAddr)
@@ -101,7 +124,7 @@ func (m *Module) Init(ctx context.Context) error {
 }
 
 func (m *Module) Start(ctx context.Context) error {
-	m.grpcSrv = grpc.NewServer()
+	m.grpcSrv = grpc.NewServer(grpc.UnaryInterceptor(authUnaryInterceptor(m.moduleToken)))
 	guardv1.RegisterPlaybackGuardServiceServer(m.grpcSrv, m)
 	modulesdk.RegisterSettings(m.grpcSrv, m.id, m)
 	go func() {
@@ -111,6 +134,7 @@ func (m *Module) Start(ctx context.Context) error {
 		}
 	}()
 	go m.connectCoreAndSubscribe(ctx)
+	go m.accountInactivityLoop(ctx)
 	return nil
 }
 
@@ -154,7 +178,7 @@ func (m *Module) connectCoreAndSubscribe(ctx context.Context) {
 		return
 	}
 	var opts []client.Option
-	if os.Getenv("MUXCORE_INSECURE_DISABLE_TLS") == "true" || os.Getenv("MUXCORE_GRPC_INSECURE") == "true" {
+	if meshInsecure() {
 		opts = append(opts, client.WithInsecure())
 	}
 	backoff := time.Second
@@ -167,10 +191,8 @@ func (m *Module) connectCoreAndSubscribe(ctx context.Context) {
 		c, err := client.Dial(addr, opts...)
 		if err != nil {
 			slog.Warn("playback-guard: dial core failed, retrying", "error", err, "backoff", backoff)
-			select {
-			case <-m.stopCh:
+			if !sleepUntilStop(m.stopCh, backoff) {
 				return
-			case <-time.After(backoff):
 			}
 			if backoff < 30*time.Second {
 				backoff *= 2
@@ -184,7 +206,33 @@ func (m *Module) connectCoreAndSubscribe(ctx context.Context) {
 		m.mc = c
 		m.mu.Unlock()
 		slog.Info("playback-guard: connected to core mesh", "addr", addr)
+		backoff = time.Second
 		m.subscribePlaybackEvents(ctx)
-		return
+		select {
+		case <-m.stopCh:
+			return
+		default:
+		}
+		slog.Warn("playback-guard: playback event subscriptions ended, reconnecting")
+		if !sleepUntilStop(m.stopCh, backoff) {
+			return
+		}
+		if backoff < 30*time.Second {
+			backoff *= 2
+		}
+	}
+}
+
+func sleepUntilStop(stopCh <-chan struct{}, d time.Duration) bool {
+	if d <= 0 {
+		return true
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-stopCh:
+		return false
+	case <-t.C:
+		return true
 	}
 }

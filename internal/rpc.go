@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	guardv1 "github.com/Muxcore-Media/playback-guard/proto/guardv1"
 )
@@ -43,6 +44,12 @@ func (m *Module) UpsertRule(ctx context.Context, req *guardv1.UpsertRuleRequest)
 	if rule == nil {
 		return nil, errInvalidRule
 	}
+	if rule.GetType() == guardv1.RuleType_RULE_TYPE_UNSPECIFIED {
+		return nil, errInvalidRule
+	}
+	if strings.TrimSpace(rule.GetName()) == "" {
+		return nil, errInvalidRule
+	}
 	db, err := m.dbConn()
 	if err != nil {
 		return nil, err
@@ -69,6 +76,23 @@ func (m *Module) UpsertRule(ctx context.Context, req *guardv1.UpsertRuleRequest)
 	}
 	rule.Id = id
 	return &guardv1.UpsertRuleResponse{Rule: rule}, nil
+}
+
+func (m *Module) DeleteRule(ctx context.Context, req *guardv1.DeleteRuleRequest) (*guardv1.DeleteRuleResponse, error) {
+	id := strings.TrimSpace(req.GetId())
+	if id == "" {
+		return &guardv1.DeleteRuleResponse{Ok: false}, nil
+	}
+	db, err := m.dbConn()
+	if err != nil {
+		return nil, err
+	}
+	res, err := db.ExecContext(ctx, `DELETE FROM guard_rules WHERE id = ?`, id)
+	if err != nil {
+		return nil, err
+	}
+	n, _ := res.RowsAffected()
+	return &guardv1.DeleteRuleResponse{Ok: n > 0}, nil
 }
 
 func (m *Module) ListViolations(ctx context.Context, req *guardv1.ListViolationsRequest) (*guardv1.ListViolationsResponse, error) {

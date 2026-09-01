@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
 	embyv1 "github.com/Muxcore-Media/emby/proto/embyv1"
 	jellyfinv1 "github.com/Muxcore-Media/jellyfin/proto/jellyfinv1"
 	guardv1 "github.com/Muxcore-Media/playback-guard/proto/guardv1"
@@ -26,6 +23,13 @@ func bridgeCapability(serverType string) string {
 }
 
 func (m *Module) TerminateSession(ctx context.Context, req *guardv1.TerminateSessionRequest) (*guardv1.TerminateSessionResponse, error) {
+	if m.terminateHook != nil {
+		return m.terminateHook(ctx, req)
+	}
+	return m.terminateSessionBridge(ctx, req)
+}
+
+func (m *Module) terminateSessionBridge(ctx context.Context, req *guardv1.TerminateSessionRequest) (*guardv1.TerminateSessionResponse, error) {
 	sessionID := strings.TrimSpace(req.GetSessionId())
 	if sessionID == "" {
 		return &guardv1.TerminateSessionResponse{Ok: false, Error: "session_id required"}, nil
@@ -35,7 +39,7 @@ func (m *Module) TerminateSession(ctx context.Context, req *guardv1.TerminateSes
 	if err != nil {
 		return &guardv1.TerminateSessionResponse{Ok: false, Error: err.Error()}, nil
 	}
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := dialPeer(addr)
 	if err != nil {
 		return &guardv1.TerminateSessionResponse{Ok: false, Error: fmt.Sprintf("dial %s: %v", addr, err)}, nil
 	}

@@ -21,7 +21,7 @@ func (m *Module) evaluateDeviceVelocity(ctx context.Context, pe playbackEvent) {
 	if err != nil || len(rules) == 0 {
 		return
 	}
-	history, err := m.listRecentHistory(ctx, userID, 200)
+	history, err := m.listRecentHistory(ctx, userID, userName, 200)
 	if err != nil {
 		return
 	}
@@ -40,11 +40,11 @@ func (m *Module) evaluateDeviceVelocity(ctx context.Context, pe playbackEvent) {
 		}
 		displayUser := firstNonEmpty(userName, userID, "unknown")
 		summary := fmt.Sprintf("%s used %d unique public IPs in %dh (limit %d)", displayUser, len(unique), windowHours, maxIPs)
-		m.fireViolation(ctx, rule.id, guardv1.RuleType_RULE_TYPE_DEVICE_VELOCITY, userID, userName, summary, "warning")
+		m.fireViolation(ctx, rule, guardv1.RuleType_RULE_TYPE_DEVICE_VELOCITY, userID, userName, summary, "warning", pe)
 	}
 }
 
-func (m *Module) evaluateAccountInactivity(ctx context.Context, pe playbackEvent) {
+func (m *Module) evaluateAccountInactivity(ctx context.Context, pe playbackEvent, excludeExternalSession string) {
 	userID := strings.TrimSpace(pe.UserID)
 	userName := strings.TrimSpace(pe.UserName)
 	if userID == "" && userName == "" {
@@ -54,11 +54,11 @@ func (m *Module) evaluateAccountInactivity(ctx context.Context, pe playbackEvent
 	if err != nil || len(rules) == 0 {
 		return
 	}
-	history, err := m.listRecentHistory(ctx, userID, 100)
+	history, err := m.listRecentHistory(ctx, userID, userName, 100)
 	if err != nil {
 		return
 	}
-	inactiveDays, neverActive := daysSinceLastActivity(history, time.Now().UTC())
+	inactiveDays, neverActive := daysSinceLastActivity(history, time.Now().UTC(), excludeExternalSession)
 
 	for _, rule := range rules {
 		thresholdDays := inactivityThresholdDays(rule.paramsJSON)
@@ -81,7 +81,7 @@ func (m *Module) evaluateAccountInactivity(ctx context.Context, pe playbackEvent
 		} else {
 			summary = fmt.Sprintf("%s inactive for %d days (threshold %d days)", displayUser, inactiveDays, thresholdDays)
 		}
-		m.fireViolation(ctx, rule.id, guardv1.RuleType_RULE_TYPE_ACCOUNT_INACTIVITY, userID, userName, summary, "info")
+		m.fireViolation(ctx, rule, guardv1.RuleType_RULE_TYPE_ACCOUNT_INACTIVITY, userID, userName, summary, "info", pe)
 	}
 }
 
@@ -112,10 +112,14 @@ func uniquePublicIPsInWindow(history []*monitorv1.SessionRecord, currentIP strin
 	return ips
 }
 
-func daysSinceLastActivity(history []*monitorv1.SessionRecord, now time.Time) (int, bool) {
+func daysSinceLastActivity(history []*monitorv1.SessionRecord, now time.Time, excludeExternalSessionID string) (int, bool) {
 	var last int64
+	excludeExternalSessionID = strings.TrimSpace(excludeExternalSessionID)
 	for _, s := range history {
 		if s == nil {
+			continue
+		}
+		if excludeExternalSessionID != "" && s.GetExternalSessionId() == excludeExternalSessionID {
 			continue
 		}
 		candidate := s.GetStoppedAtUnix()

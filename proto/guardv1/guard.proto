@@ -7,6 +7,7 @@ option go_package = "github.com/Muxcore-Media/playback-guard/proto/guardv1;guard
 service PlaybackGuardService {
   rpc ListRules(ListRulesRequest) returns (ListRulesResponse);
   rpc UpsertRule(UpsertRuleRequest) returns (UpsertRuleResponse);
+  rpc DeleteRule(DeleteRuleRequest) returns (DeleteRuleResponse);
   rpc ListViolations(ListViolationsRequest) returns (ListViolationsResponse);
   rpc AcknowledgeViolations(AcknowledgeViolationsRequest) returns (AcknowledgeViolationsResponse);
   rpc TerminateSession(TerminateSessionRequest) returns (TerminateSessionResponse);
@@ -58,6 +59,14 @@ message UpsertRuleRequest {
 
 message UpsertRuleResponse {
   GuardRule rule = 1;
+}
+
+message DeleteRuleRequest {
+  string id = 1;
+}
+
+message DeleteRuleResponse {
+  bool ok = 1;
 }
 
 message ListViolationsRequest {

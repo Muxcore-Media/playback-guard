@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -54,9 +55,10 @@ func (m *Module) updateSetting(key, value string) error {
 		m.cfgMu.Unlock()
 		return fmt.Errorf("db_path change requires module restart")
 	case "notify_on_violation", "PLAYBACK_GUARD_NOTIFY_ON_VIOLATION":
-		m.cfgMu.Lock()
-		m.notifyOnViolation = envTruthy(value)
-		m.cfgMu.Unlock()
+		enabled := envTruthy(value)
+		if err := m.setNotifyOnViolation(context.Background(), enabled); err != nil {
+			return fmt.Errorf("persist notify_on_violation: %w", err)
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown setting %q", key)

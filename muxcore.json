@@ -10,6 +10,17 @@
     "playback.guard",
     "settings"
   ],
-  "contracts": [],
+  "contracts": [
+    {
+      "repo": "github.com/Muxcore-Media/contracts-playback",
+      "interface": "PlaybackGuardEvents",
+      "version": "v0.1.0"
+    },
+    {
+      "repo": "github.com/Muxcore-Media/contracts-notification",
+      "interface": "NotificationProvider",
+      "version": "v0.1.0"
+    }
+  ],
   "minCoreVersion": "0.5.0"
 }

@@ -66,7 +66,7 @@ func TestAccountInactivityViolation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m.evaluateAccountInactivity(ctx, playbackEvent{UserID: "u1", UserName: "alice"})
+	m.evaluateAccountInactivity(ctx, playbackEvent{UserID: "u1", UserName: "alice"}, "")
 	assertViolationCount(t, m, ctx, 1)
 }
 
@@ -87,6 +87,6 @@ func TestAccountInactivityNeverActive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m.evaluateAccountInactivity(ctx, playbackEvent{UserID: "u1", UserName: "bob"})
+	m.evaluateAccountInactivity(ctx, playbackEvent{UserID: "u1", UserName: "bob"}, "")
 	assertViolationCount(t, m, ctx, 1)
 }

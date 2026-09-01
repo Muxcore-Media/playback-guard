@@ -7,8 +7,6 @@ import (
 
 	notificationv1 "github.com/Muxcore-Media/contracts-notification/muxcore/notification/v1"
 	playbackevents "github.com/Muxcore-Media/contracts-playback/events"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 type guardViolationEventPayload struct {
@@ -42,7 +40,7 @@ func (m *Module) notifyViolation(ctx context.Context, user, summary, ruleType st
 	if err != nil {
 		return
 	}
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := dialPeer(addr)
 	if err != nil {
 		return
 	}
@@ -51,7 +49,7 @@ func (m *Module) notifyViolation(ctx context.Context, user, summary, ruleType st
 	_, _ = cli.Notify(ctx, &notificationv1.NotifyRequest{
 		Title:        "Playback guard violation",
 		Message:      summary,
-		Severity:     "warning",
+		Severity:     notificationv1.Severity_SEVERITY_WARNING,
 		SourceModule: m.id,
 		Fields: map[string]string{
 			"user":      user,

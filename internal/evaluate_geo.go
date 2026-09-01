@@ -41,16 +41,55 @@ func (m *Module) loadEnabledRules(ctx context.Context, ruleType string) ([]ruleR
 	return out, rows.Err()
 }
 
-func (m *Module) fireViolation(ctx context.Context, ruleID string, ruleType guardv1.RuleType, userID, userName, summary, severity string) {
-	if m.hasOpenViolation(ctx, ruleID, userID, userName) {
+func (m *Module) fireViolation(ctx context.Context, rule ruleRow, ruleType guardv1.RuleType, userID, userName, summary, severity string, pe playbackEvent) {
+	if m.hasOpenViolation(ctx, rule.id, userID, userName) {
 		return
 	}
-	if err := m.recordViolation(ctx, ruleID, ruleType, userID, userName, summary, severity); err != nil {
+	if err := m.recordViolation(ctx, rule.id, ruleType, userID, userName, summary, severity); err != nil {
 		slog.Debug("playback-guard: record violation failed", "error", err)
 		return
 	}
+	m.maybeTerminateOnViolation(ctx, rule.paramsJSON, pe, summary)
 	displayUser := firstNonEmpty(userName, userID, "unknown")
-	go m.notifyViolation(ctx, displayUser, summary, ruleTypeToString(ruleType))
+	notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	go func() {
+		defer cancel()
+		m.notifyViolation(notifyCtx, displayUser, summary, ruleTypeToString(ruleType))
+	}()
+}
+
+func ruleRequestsTerminate(paramsJSON string) bool {
+	var params map[string]string
+	if err := json.Unmarshal([]byte(paramsJSON), &params); err != nil {
+		return false
+	}
+	if v, ok := params["action"]; ok && strings.EqualFold(strings.TrimSpace(v), "terminate") {
+		return true
+	}
+	if v, ok := params["terminate_on_violation"]; ok {
+		return envTruthy(v)
+	}
+	return false
+}
+
+func (m *Module) maybeTerminateOnViolation(ctx context.Context, paramsJSON string, pe playbackEvent, reason string) {
+	if !ruleRequestsTerminate(paramsJSON) {
+		return
+	}
+	ext := strings.TrimSpace(pe.ExternalSession)
+	if ext == "" {
+		return
+	}
+	req := &guardv1.TerminateSessionRequest{
+		SessionId:  ext,
+		ServerType: pe.ServerType,
+		Reason:     reason,
+	}
+	if m.terminateHook != nil {
+		_, _ = m.terminateHook(ctx, req)
+		return
+	}
+	_, _ = m.terminateSessionBridge(ctx, req)
 }
 
 func (m *Module) evaluateOnSessionStart(ctx context.Context, pe playbackEvent) {
@@ -60,7 +99,7 @@ func (m *Module) evaluateOnSessionStart(ctx context.Context, pe playbackEvent) {
 	m.evaluateSimultaneousLocations(ctx, pe)
 	m.evaluateImpossibleTravel(ctx, pe)
 	m.evaluateDeviceVelocity(ctx, pe)
-	m.evaluateAccountInactivity(ctx, pe)
+	m.evaluateAccountInactivity(ctx, pe, pe.ExternalSession)
 }
 
 func (m *Module) evaluateGeoRestriction(ctx context.Context, pe playbackEvent) {
@@ -97,7 +136,7 @@ func (m *Module) evaluateGeoRestriction(ctx context.Context, pe playbackEvent) {
 		}
 		displayUser := firstNonEmpty(userName, userID, "unknown")
 		summary := fmt.Sprintf("%s streaming from restricted country %s (%s)", displayUser, country, mode)
-		m.fireViolation(ctx, rule.id, guardv1.RuleType_RULE_TYPE_GEO_RESTRICTION, userID, userName, summary, "warning")
+		m.fireViolation(ctx, rule, guardv1.RuleType_RULE_TYPE_GEO_RESTRICTION, userID, userName, summary, "warning", pe)
 	}
 }
 
@@ -131,7 +170,7 @@ func (m *Module) evaluateSimultaneousLocations(ctx context.Context, pe playbackE
 		}
 		displayUser := firstNonEmpty(userName, userID, "unknown")
 		summary := fmt.Sprintf("%s has active sessions ~%.0f km apart (limit %.0f km)", displayUser, maxDistance, minKm)
-		m.fireViolation(ctx, rule.id, guardv1.RuleType_RULE_TYPE_SIMULTANEOUS_LOCATIONS, userID, userName, summary, "warning")
+		m.fireViolation(ctx, rule, guardv1.RuleType_RULE_TYPE_SIMULTANEOUS_LOCATIONS, userID, userName, summary, "warning", pe)
 	}
 }
 
@@ -153,7 +192,7 @@ func (m *Module) evaluateImpossibleTravel(ctx context.Context, pe playbackEvent)
 	if current == nil || !sessionHasGeoCoords(current) {
 		return
 	}
-	history, err := m.listRecentHistory(ctx, userID, 20)
+	history, err := m.listRecentHistory(ctx, userID, userName, 20)
 	if err != nil {
 		return
 	}
@@ -188,11 +227,16 @@ func (m *Module) evaluateImpossibleTravel(ctx context.Context, pe playbackEvent)
 		}
 		displayUser := firstNonEmpty(userName, userID, "unknown")
 		summary := fmt.Sprintf("%s travel speed %.0f km/h exceeds limit %.0f km/h (%.0f km)", displayUser, speed, maxSpeed, distance)
-		m.fireViolation(ctx, rule.id, guardv1.RuleType_RULE_TYPE_IMPOSSIBLE_TRAVEL, userID, userName, summary, "critical")
+		m.fireViolation(ctx, rule, guardv1.RuleType_RULE_TYPE_IMPOSSIBLE_TRAVEL, userID, userName, summary, "critical", pe)
 	}
 }
 
-func (m *Module) listRecentHistory(ctx context.Context, userID string, limit int32) ([]*monitorv1.SessionRecord, error) {
+func (m *Module) listRecentHistory(ctx context.Context, userID, userName string, limit int32) ([]*monitorv1.SessionRecord, error) {
+	userID = strings.TrimSpace(userID)
+	userName = strings.TrimSpace(userName)
+	if userID == "" && userName == "" {
+		return nil, nil
+	}
 	var cli monitorv1.PlaybackMonitorServiceClient
 	var closer func()
 	var err error
@@ -206,10 +250,13 @@ func (m *Module) listRecentHistory(ctx context.Context, userID string, limit int
 		}
 	}
 	defer closer()
-	resp, err := cli.ListHistory(ctx, &monitorv1.ListHistoryRequest{
-		UserId: userID,
-		Limit:  limit,
-	})
+	req := &monitorv1.ListHistoryRequest{Limit: limit}
+	if userID != "" {
+		req.UserId = userID
+	} else {
+		req.Query = userName
+	}
+	resp, err := cli.ListHistory(ctx, req)
 	if err != nil {
 		return nil, err
 	}

@@ -7,9 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
 	monitorv1 "github.com/Muxcore-Media/playback-monitor/proto/monitorv1"
 )
 
@@ -60,7 +57,7 @@ func (m *Module) withMonitorClient(ctx context.Context) (monitorv1.PlaybackMonit
 	if err != nil {
 		return nil, nil, err
 	}
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := dialPeer(addr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial monitor %s: %w", addr, err)
 	}
