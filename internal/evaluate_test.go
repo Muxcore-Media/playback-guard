@@ -18,6 +18,10 @@ type fakeMonitorClient struct {
 	watchUsers []*monitorv1.WatchUser
 }
 
+func (f *fakeMonitorClient) DeleteUserHistory(context.Context, *monitorv1.DeleteUserHistoryRequest, ...grpc.CallOption) (*monitorv1.DeleteUserHistoryResponse, error) {
+	return &monitorv1.DeleteUserHistoryResponse{}, nil
+}
+
 func (f *fakeMonitorClient) IngestSessionEvent(context.Context, *monitorv1.IngestSessionEventRequest, ...grpc.CallOption) (*monitorv1.IngestSessionEventResponse, error) {
 	return nil, nil
 }
