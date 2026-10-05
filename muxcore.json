@@ -1,7 +1,7 @@
 {
   "name": "Playback Guard",
   "description": "Sharing detection, trust scores, and session guard rules (Tracearr parity)",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "MuxCore",
   "roles": [
     "security"
