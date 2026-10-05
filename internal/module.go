@@ -15,12 +15,11 @@ import (
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	"github.com/Muxcore-Media/core/sdk/go/client"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
+	manifest "github.com/Muxcore-Media/playback-guard"
 	guardv1 "github.com/Muxcore-Media/playback-guard/proto/guardv1"
 	monitorv1 "github.com/Muxcore-Media/playback-monitor/proto/monitorv1"
 	_ "modernc.org/sqlite"
 )
-
-const moduleVersion = "0.1.0"
 
 type Module struct {
 	guardv1.UnimplementedPlaybackGuardServiceServer
@@ -78,7 +77,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:          m.id,
 		Name:        "Playback Guard",
-		Version:     moduleVersion,
+		Version:     modulesdk.ManifestVersion(manifest.ManifestJSON),
 		Roles:       []string{"security"},
 		Description: "Sharing detection, trust scores, and guard rules (Tracearr parity)",
 		Author:      "MuxCore",
