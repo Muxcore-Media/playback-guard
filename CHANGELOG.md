@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Subscribe to `identity.user.deleted` and delete that account's violations, trust score, and aliases (NFR-DATA-003). Guard rules stay.
+
 ## [0.1.2] - 2026-10-05
 
 ### Changed

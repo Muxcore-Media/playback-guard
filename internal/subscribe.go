@@ -67,6 +67,7 @@ func (m *Module) runPlaybackSubscriptions(ctx context.Context) bool {
 			}
 		}(ch, et, cancel)
 	}
+	m.subscribeUserDeleted(ctx, mc, &wg, &active)
 	if active == 0 {
 		return false
 	}
