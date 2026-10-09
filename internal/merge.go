@@ -64,6 +64,24 @@ func (m *Module) mergeUsers(ctx context.Context, sourceID, sourceName, targetID,
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// ADR-0035: a merge may not create an alias, move violations or write a
+	// trust score for an erased user id (as source or as target).
+	for _, id := range []string{sourceID, targetID} {
+		if id == "" {
+			continue
+		}
+		if m.ledgerErased(id) {
+			return 0, 0, errUserErased
+		}
+		erased, checkErr := userErasedTx(ctx, tx, id)
+		if checkErr != nil {
+			return 0, 0, checkErr
+		}
+		if erased {
+			return 0, 0, errUserErased
+		}
+	}
+
 	now := nowRFC3339()
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO user_aliases(alias_key, canonical_user_id, canonical_user_name, created_at)
