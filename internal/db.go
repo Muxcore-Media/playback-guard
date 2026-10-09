@@ -62,6 +62,17 @@ func (m *Module) initDB(ctx context.Context) error {
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL
 		)`,
+		// ADR-0035 §2: one row per erasure this module has applied. user_id is
+		// kept (and no username) so a late write for an erased id is refused
+		// after a restart; the table is never pruned.
+		`CREATE TABLE IF NOT EXISTS erasure_applied (
+			erasure_id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			tenant_id TEXT NOT NULL DEFAULT '',
+			applied_at TEXT NOT NULL,
+			counts_json TEXT NOT NULL DEFAULT '{}'
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_erasure_applied_user ON erasure_applied(user_id)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {

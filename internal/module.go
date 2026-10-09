@@ -15,6 +15,7 @@ import (
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	"github.com/Muxcore-Media/core/sdk/go/client"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
+	"github.com/Muxcore-Media/core/sdk/go/module/erasure"
 	manifest "github.com/Muxcore-Media/playback-guard"
 	guardv1 "github.com/Muxcore-Media/playback-guard/proto/guardv1"
 	monitorv1 "github.com/Muxcore-Media/playback-monitor/proto/monitorv1"
@@ -28,6 +29,8 @@ type Module struct {
 	grpcLis           net.Listener
 	stopCh            chan struct{}
 	mc                *client.Client
+	reconciler        *erasure.Reconciler
+	reconcileCancel   context.CancelFunc
 	db                *sql.DB
 	grpcSrv           *grpc.Server
 	id                string
@@ -36,7 +39,9 @@ type Module struct {
 	moduleToken       string
 	mu                sync.RWMutex
 	cfgMu             sync.RWMutex
+	reconcileWG       sync.WaitGroup
 	notifyOnViolation bool
+	stopped           bool
 }
 
 type Config struct {
@@ -146,6 +151,8 @@ func (m *Module) Stop(ctx context.Context) error {
 	if m.grpcSrv != nil {
 		m.grpcSrv.GracefulStop()
 	}
+	// The reconciler writes to the database: stop it before closing it.
+	m.stopReconciler()
 	m.mu.Lock()
 	mc := m.mc
 	if m.db != nil {
@@ -206,6 +213,9 @@ func (m *Module) connectCoreAndSubscribe(ctx context.Context) {
 		m.mu.Unlock()
 		slog.Info("playback-guard: connected to core mesh", "addr", addr)
 		backoff = time.Second
+		// ADR-0035: the erasure reconciler needs the core connection (it finds
+		// the identity provider through core discovery). Started once.
+		m.startReconcilerFromCore(ctx)
 		m.subscribePlaybackEvents(ctx)
 		select {
 		case <-m.stopCh:

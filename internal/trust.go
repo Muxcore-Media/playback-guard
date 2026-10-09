@@ -81,6 +81,21 @@ func (m *Module) listTrustScores(ctx context.Context, limit int) ([]*guardv1.Tru
 }
 
 func (m *Module) adjustTrustOnViolation(ctx context.Context, userID, userName string, penalty int) error {
+	userID = strings.TrimSpace(userID)
+	if m.ledgerErased(userID) {
+		return errUserErased
+	}
+	db, err := m.dbConn()
+	if err != nil {
+		return err
+	}
+	return adjustTrustExec(ctx, db, userID, userName, penalty)
+}
+
+// adjustTrustExec lowers a trust score. The write is one guarded statement: it
+// does nothing for an erased user id (errUserErased), whether the erasure was
+// recorded before or after this process started.
+func adjustTrustExec(ctx context.Context, x execer, userID, userName string, penalty int) error {
 	if penalty <= 0 {
 		penalty = 10
 	}
@@ -88,22 +103,28 @@ func (m *Module) adjustTrustOnViolation(ctx context.Context, userID, userName st
 	if key == "name:" {
 		return nil
 	}
-	db, err := m.dbConn()
-	if err != nil {
-		return err
-	}
 	now := nowRFC3339()
-	_, err = db.ExecContext(ctx, `
+	res, err := x.ExecContext(ctx, `
 		INSERT INTO trust_scores(user_key, user_id, user_name, score, updated_at)
-		VALUES (?, ?, ?, ?, ?)
+		SELECT ?, ?, ?, ?, ?
+		WHERE `+notErasedSQL+`
 		ON CONFLICT(user_key) DO UPDATE SET
 			user_id = excluded.user_id,
 			user_name = excluded.user_name,
 			score = MAX(0, trust_scores.score - ?),
 			updated_at = excluded.updated_at`,
-		key, userID, userName, defaultTrustScore-penalty, now, penalty,
+		key, userID, userName, defaultTrustScore-penalty, now, strings.TrimSpace(userID), penalty,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		if err != nil {
+			return err
+		}
+		return errUserErased
+	}
+	return nil
 }
 
 func (m *Module) resetTrustScore(ctx context.Context, userID, userName string) (*guardv1.TrustScore, error) {
@@ -111,21 +132,32 @@ func (m *Module) resetTrustScore(ctx context.Context, userID, userName string) (
 	if key == "name:" {
 		return nil, fmt.Errorf("user_id or user_name required")
 	}
+	userID = strings.TrimSpace(userID)
+	if m.ledgerErased(userID) {
+		return nil, errUserErased
+	}
 	db, err := m.dbConn()
 	if err != nil {
 		return nil, err
 	}
 	now := nowRFC3339()
-	_, err = db.ExecContext(ctx, `
+	res, err := db.ExecContext(ctx, `
 		INSERT INTO trust_scores(user_key, user_id, user_name, score, updated_at)
-		VALUES (?, ?, ?, ?, ?)
+		SELECT ?, ?, ?, ?, ?
+		WHERE `+notErasedSQL+`
 		ON CONFLICT(user_key) DO UPDATE SET
 			score = ?,
 			updated_at = excluded.updated_at`,
-		key, userID, userName, defaultTrustScore, now, defaultTrustScore,
+		key, userID, userName, defaultTrustScore, now, userID, defaultTrustScore,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errUserErased
 	}
 	return m.getTrustScore(ctx, userID, userName)
 }
