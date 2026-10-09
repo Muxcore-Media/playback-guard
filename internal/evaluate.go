@@ -83,20 +83,38 @@ func (m *Module) hasOpenViolation(ctx context.Context, ruleID, userID, userName 
 }
 
 func (m *Module) recordViolation(ctx context.Context, ruleID string, ruleType guardv1.RuleType, userID, userName, summary, severity string) error {
+	// ADR-0035: no new rows for an erased user id. The in-memory ledger hint
+	// refuses early; the INSERT guard below is the persistent, race-free check.
+	userID = strings.TrimSpace(userID)
+	if m.ledgerErased(userID) {
+		return errUserErased
+	}
 	db, err := m.dbConn()
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, `
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `
 		INSERT INTO violations(id, rule_id, rule_type, user_id, user_name, summary, severity, acknowledged, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-		newID(), ruleID, ruleTypeToString(ruleType), userID, userName, summary, severity, nowRFC3339(),
+		SELECT ?, ?, ?, ?, ?, ?, ?, 0, ?
+		WHERE `+notErasedSQL,
+		newID(), ruleID, ruleTypeToString(ruleType), userID, userName, summary, severity, nowRFC3339(), userID,
 	)
 	if err != nil {
 		return err
 	}
-	_ = m.adjustTrustOnViolation(ctx, userID, userName, 10)
-	return nil
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		if err != nil {
+			return err
+		}
+		return errUserErased
+	}
+	_ = adjustTrustExec(ctx, tx, userID, userName, 10)
+	return tx.Commit()
 }
 
 func parseIntDefault(paramsJSON, key string, def int) int {

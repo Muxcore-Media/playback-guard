@@ -1,0 +1,72 @@
+//go:build upgradeseed
+
+package internal
+
+import (
+	"context"
+	"os"
+	"testing"
+
+	guardv1 "github.com/Muxcore-Media/playback-guard/proto/guardv1"
+)
+
+// TestUpgradeSeed writes the ADR-0015 upgrade fixture for the tag this file is
+// compiled against, using that tag's own store code. Run through
+// scripts/upgrade-fixtures/snapshot.sh (see README.md in this directory).
+//
+// Seed (all ids and names are fixtures):
+//   - u-victim "alice": 2 violations, trust 80
+//   - u-bystander "bob": 1 violation, trust 90
+//   - carol (name only, no id): 1 violation, trust 90 under name:carol
+//   - ext-jf-9 "alice-jf" merged into u-victim: alias id:ext-jf-9 and its
+//     moved violation; "bob-old" merged into u-bystander: alias name:bob-old
+//   - one guard rule and the notify_on_violation setting
+func TestUpgradeSeed(t *testing.T) {
+	dbPath := os.Getenv("UPGRADE_SEED_DB")
+	if dbPath == "" {
+		t.Skip("UPGRADE_SEED_DB not set")
+	}
+	ctx := context.Background()
+	m := NewModule(Config{DBPath: dbPath, GRPCAddr: "127.0.0.1:0"})
+	m.monitorOverride = &fakeMonitorClient{}
+	if err := m.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if m.grpcLis != nil {
+		_ = m.grpcLis.Close()
+	}
+
+	rule, err := m.UpsertRule(ctx, &guardv1.UpsertRuleRequest{Rule: &guardv1.GuardRule{
+		Type: guardv1.RuleType_RULE_TYPE_CONCURRENT_STREAMS, Name: "Max 2", Enabled: true,
+		Params: map[string]string{"max_streams": "2"},
+	}})
+	if err != nil {
+		t.Fatalf("UpsertRule: %v", err)
+	}
+	rid := rule.GetRule().GetId()
+	rt := guardv1.RuleType_RULE_TYPE_CONCURRENT_STREAMS
+	for _, v := range []struct{ id, name, summary string }{
+		{"u-victim", "alice", "alice streams 1"},
+		{"u-victim", "alice", "alice streams 2"},
+		{"u-bystander", "bob", "bob streams"},
+		{"", "carol", "carol streams"},
+		{"ext-jf-9", "alice-jf", "alice-jf streams"},
+		{"", "bob-old", "bob-old streams"},
+	} {
+		if err := m.recordViolation(ctx, rid, rt, v.id, v.name, v.summary, "warning"); err != nil {
+			t.Fatalf("recordViolation: %v", err)
+		}
+	}
+	if _, _, err := m.mergeUsers(ctx, "ext-jf-9", "alice-jf", "u-victim", "alice"); err != nil {
+		t.Fatalf("merge 1: %v", err)
+	}
+	if _, _, err := m.mergeUsers(ctx, "", "bob-old", "u-bystander", "bob"); err != nil {
+		t.Fatalf("merge 2: %v", err)
+	}
+	if err := m.UpdateSetting("notify_on_violation", "1"); err != nil {
+		t.Fatalf("UpdateSetting: %v", err)
+	}
+	if err := m.Stop(ctx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+}
